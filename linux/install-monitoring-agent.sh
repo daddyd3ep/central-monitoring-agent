@@ -9,15 +9,16 @@ CONFIG_FILE="${CONFIG_DIR}/config.json"
 AGENT_SCRIPT="/usr/local/bin/monitor-agent.py"
 SYSTEMD_UNIT="/etc/systemd/system/${AGENT_NAME}.service"
 
-say() { echo -e "\n==> $*"; }
+# IMPORTANT: say() must write to STDERR so command-substitutions (like TOKEN="$(...)") are clean
+say()  { echo -e "\n==> $*" >&2; }
 warn() { echo -e "\n[WARN] $*" >&2; }
-die() { echo -e "\n[ERROR] $*" >&2; exit 1; }
+die()  { echo -e "\n[ERROR] $*" >&2; exit 1; }
 
 DRY_RUN="false"
 
 run() {
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] $*"
+    echo "[dry-run] $*" >&2
   else
     eval "$@"
   fi
@@ -34,9 +35,9 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 apt_install_if_missing() {
   local pkg="$1"
   if dpkg -s "$pkg" >/dev/null 2>&1; then
-    echo " - $pkg already installed"
+    echo " - $pkg already installed" >&2
   else
-    echo " - Installing $pkg"
+    echo " - Installing $pkg" >&2
     run "apt-get install -y '$pkg'"
   fi
 }
@@ -56,20 +57,6 @@ Options:
   --no-start             Install but do not enable/start the systemd service.
   --dry-run              Show what would happen; make no changes.
   -h, --help             Show help.
-
-Examples:
-  Interactive (creates token):
-    sudo ./install-monitoring-agent.sh --base-url https://monitor.example.com
-
-  Non-interactive (use existing token):
-    sudo ./install-monitoring-agent.sh \
-      --base-url https://monitor.example.com \
-      --name record.example.com \
-      --token 'EXISTING_TOKEN' \
-      --interval 60
-
-  Dry run:
-    sudo ./install-monitoring-agent.sh --dry-run --base-url https://monitor.example.com --token X
 EOF
 }
 
@@ -84,7 +71,7 @@ test_base_url() {
   if [[ -z "$code" || "$code" == "000" ]]; then
     die "Could not reach $test_url (DNS/TLS/network). Check --base-url and try again."
   fi
-  echo " - Got HTTP $code"
+  echo " - Got HTTP $code" >&2
 }
 
 is_ipv4() {
@@ -100,7 +87,6 @@ is_ipv6() {
 }
 
 detect_public_ip() {
-  # Prefer v4, then v6. Multiple sources for accuracy.
   local v4=(
     "https://api.ipify.org"
     "https://ipv4.icanhazip.com"
@@ -122,7 +108,6 @@ detect_public_ip() {
     if [[ -n "$ip" ]] && is_ipv6 "$ip"; then echo "$ip"; return 0; fi
   done
 
-  # fallback local IP
   ip="$(hostname -I 2>/dev/null | awk '{print $1}' | tr -d ' \n\r\t' || true)"
   [[ -n "$ip" ]] && echo "$ip" || echo ""
 }
@@ -136,23 +121,24 @@ create_token() {
 
   say "Creating server entry + token via: ${create_url}"
 
-  local resp
+  local resp token
   resp="$(curl -fsS -X POST "$create_url" \
     -H "Content-Type: application/json" \
     -H "X-Admin-Key: ${admin_key}" \
     -d "{\"name\":\"${server_name}\",\"host\":\"${host_ip}\"}" \
   )" || die "Failed to create server/token. Check base URL/admin key and try again."
 
-  local token
   token="$(echo "$resp" | jq -r '.token // empty')" || true
   [[ -n "$token" && "$token" != "null" ]] || die "Token was not returned."
-  echo "$token"
+
+  # IMPORTANT: token must be the only stdout output from this function
+  printf '%s' "$token"
 }
 
 install_agent_script() {
   say "Installing agent script to: $AGENT_SCRIPT"
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] write $AGENT_SCRIPT"
+    echo "[dry-run] write $AGENT_SCRIPT" >&2
     return 0
   fi
 
@@ -169,6 +155,11 @@ def load_json(path: str) -> Optional[dict]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        # Config exists but is invalid JSON
+        raise SystemExit(f"Invalid JSON in {path}")
     except Exception:
         return None
 
@@ -180,7 +171,6 @@ def save_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 def get_os_pretty_name() -> str:
-    # Prefer PRETTY_NAME from /etc/os-release
     try:
         with open("/etc/os-release", "r", encoding="utf-8") as f:
             for line in f:
@@ -191,7 +181,6 @@ def get_os_pretty_name() -> str:
                         return v
     except Exception:
         pass
-    # Fallback
     try:
         import platform
         return platform.platform()
@@ -313,7 +302,7 @@ write_config() {
 
   say "Writing config to: $CONFIG_FILE"
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] write $CONFIG_FILE"
+    echo "[dry-run] write $CONFIG_FILE" >&2
     return 0
   fi
 
@@ -328,6 +317,9 @@ write_config() {
 }
 JSON
   chmod 600 "$CONFIG_FILE"
+
+  # Validate config JSON before proceeding
+  python3 -m json.tool "$CONFIG_FILE" >/dev/null 2>&1 || die "Config JSON is invalid; refusing to continue."
 }
 
 install_systemd_unit() {
@@ -336,7 +328,7 @@ install_systemd_unit() {
 
   say "Creating systemd service: $SYSTEMD_UNIT"
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] write $SYSTEMD_UNIT"
+    echo "[dry-run] write $SYSTEMD_UNIT" >&2
     return 0
   fi
 
@@ -345,6 +337,7 @@ install_systemd_unit() {
 Description=Monitor Agent
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=$CONFIG_FILE
 
 [Service]
 Type=simple
@@ -421,27 +414,21 @@ main() {
   say "Creating directories"
   run "mkdir -p '$CONFIG_DIR' '$STATE_DIR' '$VENV_DIR'"
 
-  # Decide python executable to run the agent with:
-  # Prefer venv; fallback to system python + apt deps if venv not possible.
   local PY_EXEC=""
-  local USING_VENV="false"
 
   say "Attempting venv setup (preferred)"
-  # python3-venv may not be installed by default on older systems
   if dpkg -s python3-venv >/dev/null 2>&1; then
-    echo " - python3-venv already installed"
+    echo " - python3-venv already installed" >&2
   else
-    echo " - Installing python3-venv"
+    echo " - Installing python3-venv" >&2
     run "apt-get install -y python3-venv" || true
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[dry-run] python3 -m venv $VENV_DIR"
-    USING_VENV="true"
+    echo "[dry-run] python3 -m venv $VENV_DIR" >&2
     PY_EXEC="${VENV_DIR}/bin/python"
   else
     if python3 -m venv "$VENV_DIR" >/dev/null 2>&1; then
-      USING_VENV="true"
       PY_EXEC="${VENV_DIR}/bin/python"
       say "Installing Python deps into venv"
       "${VENV_DIR}/bin/pip" install --upgrade pip >/dev/null || true
@@ -463,7 +450,6 @@ PY
     fi
   fi
 
-  # Token path
   if [[ -n "$TOKEN" ]]; then
     say "Using provided token (--token). Skipping server registration."
   else
@@ -474,7 +460,7 @@ PY
 
     if [[ -z "$ADMIN_KEY" ]]; then
       read -rsp "Admin key (X-Admin-Key): " ADMIN_KEY
-      echo
+      echo >&2
     fi
     [[ -n "$ADMIN_KEY" ]] || die "Admin key cannot be empty."
 
@@ -486,14 +472,14 @@ PY
       read -rp "Enter host IP to store in monitoring (display only): " HOST_IP
     fi
     [[ -n "$HOST_IP" ]] || die "Host/IP cannot be empty."
-    echo " - Using host: $HOST_IP"
+    echo " - Using host: $HOST_IP" >&2
 
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "[dry-run] would call servers_create.php to get token"
+      echo "[dry-run] would call servers_create.php to get token" >&2
       TOKEN="DRY_RUN_TOKEN"
     else
       TOKEN="$(create_token "$BASE_URL" "$SERVER_NAME" "$HOST_IP" "$ADMIN_KEY")"
-      echo " - Token created"
+      echo " - Token created" >&2
     fi
   fi
 
@@ -515,7 +501,7 @@ PY
   cat <<EOF
 
 ========================================
-✅ Monitoring agent installed${DRY_RUN:+ (dry-run)}
+✅ Monitoring agent installed
 ========================================
 
 Config file:

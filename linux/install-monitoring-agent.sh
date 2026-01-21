@@ -2,6 +2,7 @@
 set -euo pipefail
 
 AGENT_NAME="monitor-agent"
+AGENT_VERSION="1.0.0"
 VENV_DIR="/opt/monitor-agent"
 CONFIG_DIR="/etc/monitor-agent"
 STATE_DIR="/var/lib/monitor-agent"
@@ -142,7 +143,8 @@ install_agent_script() {
     return 0
   fi
 
-  cat > "$AGENT_SCRIPT" <<'PY'
+  # NOTE: heredoc is unquoted to allow injecting AGENT_VERSION safely (constant defined in this script)
+  cat > "$AGENT_SCRIPT" <<PY
 #!/usr/bin/env python3
 import json, os, time
 from dataclasses import dataclass
@@ -150,6 +152,10 @@ from typing import List, Optional, Tuple
 
 import psutil
 import requests
+
+AGENT_NAME = "monitor-agent"
+AGENT_VERSION = "${AGENT_VERSION}"
+USER_AGENT = f"{AGENT_NAME}/{AGENT_VERSION}"
 
 def load_json(path: str) -> Optional[dict]:
     try:
@@ -250,7 +256,15 @@ def main():
     os_version = get_os_pretty_name()
     psutil.cpu_percent(interval=None)
     sess = requests.Session()
-    headers = {"Authorization": f"Bearer {cfg['token']}"}
+
+    # Observability headers:
+    # - User-Agent shows up in nginx access logs by default
+    # - X-Agent-Version is easy to read server-side in PHP
+    headers = {
+        "Authorization": f"Bearer {cfg['token']}",
+        "User-Agent": USER_AGENT,
+        "X-Agent-Version": AGENT_VERSION,
+    }
 
     while True:
         now = int(time.time())
@@ -397,6 +411,7 @@ main() {
 
   say "Base URL: $BASE_URL"
   say "Interval: ${INTERVAL}s"
+  say "Agent version: ${AGENT_VERSION}"
   say "Dry run: $DRY_RUN"
 
   have_cmd apt-get || die "This installer supports Debian/Ubuntu (apt-get) only."

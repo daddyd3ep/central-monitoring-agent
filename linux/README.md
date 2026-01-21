@@ -1,10 +1,3 @@
-```markdown
-![OS](https://img.shields.io/badge/os-debian%2010%2B-blue)
-![Init](https://img.shields.io/badge/init-systemd-green)
-![Language](https://img.shields.io/badge/python-3.x-yellow)
-![Status](https://img.shields.io/badge/status-stable-brightgreen)
-```
-
 # Monitoring Agent (Linux)
 
 A lightweight Linux monitoring agent that periodically reports server health metrics to a central monitoring server.

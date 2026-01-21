@@ -510,10 +510,6 @@ Config file:
 Service name:
   $AGENT_NAME
 
-Payload additions:
-  os_version (PRETTY_NAME from /etc/os-release)
-  uptime_seconds
-
 Commands:
   Start:    sudo systemctl start $AGENT_NAME
   Stop:     sudo systemctl stop $AGENT_NAME

@@ -295,12 +295,21 @@ def main():
             "uptime_seconds": uptime_seconds,
         }
 
+        sleep_for = interval
         try:
-            sess.post(cfg["endpoint"], json=payload, headers=headers, timeout=10)
+            r = sess.post(cfg["endpoint"], json=payload, headers=headers, timeout=10)
+            try:
+                j = r.json() if r.content else {}
+                if isinstance(j, dict) and j.get("cmd") == "backoff":
+                    n = int(j.get("interval_seconds", 0) or 0)
+                    if n > 0:
+                        sleep_for = n
+            except Exception:
+                pass
         except Exception:
             pass
 
-        time.sleep(interval)
+        time.sleep(sleep_for)
 
 if __name__ == "__main__":
     main()

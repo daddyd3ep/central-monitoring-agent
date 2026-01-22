@@ -2,7 +2,7 @@
 set -euo pipefail
 
 AGENT_NAME="monitor-agent"
-AGENT_VERSION="1.0.0"
+AGENT_VERSION="1.0.1"
 VENV_DIR="/opt/monitor-agent"
 CONFIG_DIR="/etc/monitor-agent"
 STATE_DIR="/var/lib/monitor-agent"
@@ -193,6 +193,47 @@ def get_os_pretty_name() -> str:
     except Exception:
         return "Linux"
 
+def get_cpu_model() -> str:
+    # Linux-friendly: /proc/cpuinfo
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.lower().startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    # Fallback
+    try:
+        import platform
+        return platform.processor() or platform.platform()
+    except Exception:
+        return "Unknown CPU"
+
+def get_cpu_mhz() -> int:
+    # Prefer psutil current frequency if available
+    try:
+        freq = psutil.cpu_freq()
+        if freq and getattr(freq, "current", None):
+            cur = float(freq.current)
+            if cur > 0:
+                return int(round(cur))
+    except Exception:
+        pass
+
+    # Fallback: /proc/cpuinfo cpu MHz
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.lower().startswith("cpu mhz"):
+                    v = line.split(":", 1)[1].strip()
+                    mhz = float(v)
+                    if mhz > 0:
+                        return int(round(mhz))
+    except Exception:
+        pass
+
+    return 0
+
 def net_totals_sum_non_loopback() -> Tuple[int, int]:
     rx = tx = 0
     pernic = psutil.net_io_counters(pernic=True)
@@ -254,6 +295,8 @@ def main():
         save_json(state_path, net.state())
 
     os_version = get_os_pretty_name()
+    cpu_model = get_cpu_model()  # stable, compute once
+
     psutil.cpu_percent(interval=None)
     sess = requests.Session()
 
@@ -282,9 +325,13 @@ def main():
         except Exception:
             uptime_seconds = 0
 
+        cpu_mhz = get_cpu_mhz()
+
         payload = {
             "ts": now,
             "cpu_pct": cpu,
+            "cpu_model": cpu_model,
+            "cpu_mhz": int(cpu_mhz),
             "ram_total_mb": int(vm.total // (1024*1024)),
             "ram_used_mb": int((vm.total - vm.available) // (1024*1024)),
             "disk_total_gb": round(du.total / (1024**3), 3),

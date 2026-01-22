@@ -8,7 +8,7 @@ Designed for **Debian-family systems (including Debian 10)** and managed via **s
 
 ## ✨ Features
 
-- CPU, memory, disk, network, uptime metrics
+- CPU, processor, memory, disk, network, uptime metrics
 - OS version detection (`/etc/os-release`)
 - Secure token-based authentication
 - Works on older Debian / Ubuntu servers

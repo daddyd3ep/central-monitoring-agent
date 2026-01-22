@@ -6,9 +6,12 @@ The format follows **Keep a Changelog** principles.
 
 ---
 
-## [Unreleased]
+## [1.0.1]
 
 ### Added
+- CPU model
+- CPU Speed
+- Agent version headers
 - OS version reporting (`PRETTY_NAME`)
 - Server uptime reporting
 - Public IP auto-detection

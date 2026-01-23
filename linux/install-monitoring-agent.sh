@@ -2,7 +2,7 @@
 set -euo pipefail
 
 AGENT_NAME="monitor-agent"
-AGENT_VERSION="1.0.1"
+AGENT_VERSION="1.1.1"
 VENV_DIR="/opt/monitor-agent"
 CONFIG_DIR="/etc/monitor-agent"
 STATE_DIR="/var/lib/monitor-agent"

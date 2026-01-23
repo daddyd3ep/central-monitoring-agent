@@ -6,7 +6,7 @@ The format follows **Keep a Changelog** principles.
 
 ---
 
-## [1.0.1]
+## [1.1.1]
 
 ### Added
 - CPU model
